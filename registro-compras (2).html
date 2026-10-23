@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Registro de compras</title>
+<style>
+:root{--bg:#eef1ec;--ink:#2b2118;--muted:#6b6258;--card:#fff;--ac:#3e6b4f;--ac-ink:#fff;--err:#b23a5a;--line:#d9ddd5}
+@media(prefers-color-scheme:dark){:root{--bg:#1b1f1b;--ink:#eee8de;--muted:#a79f93;--card:#252a25;--ac:#7fbf98;--ac-ink:#14201a;--err:#e57f9b;--line:#38403a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Trebuchet MS","Segoe UI",sans-serif;padding:20px 16px 40px}
+main{max-width:520px;margin:0 auto}
+h1{font-size:1.6rem;margin:0 0 4px}
+p.sub{margin:0 0 20px;color:var(--muted)}
+form,.list{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+label{display:block;font-weight:600;margin-top:12px;font-size:.95rem}
+label:first-child{margin-top:0}
+input{width:100%;padding:11px 12px;margin-top:4px;font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:8px}
+input:focus,button:focus-visible{outline:3px solid var(--ac);outline-offset:1px}
+.row{display:flex;gap:12px}.row>label{flex:1;margin-top:12px}
+button{font:inherit;font-weight:700;border:0;border-radius:8px;padding:12px 16px;cursor:pointer}
+.add{width:100%;margin-top:16px;background:var(--ac);color:var(--ac-ink)}
+.list{margin-top:20px}
+.list h2{font-size:1.1rem;margin:0 0 8px}
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-top:1px solid var(--line)}
+li small{display:block;color:var(--muted)}
+.del{background:none;color:var(--err);padding:6px 10px}
+.tot{display:flex;justify-content:space-between;font-weight:700;border-top:2px solid var(--ink);padding-top:10px;margin-top:4px}
+.send{width:100%;margin-top:14px;background:var(--ink);color:var(--bg)}
+.send:disabled{opacity:.4;cursor:not-allowed}
+#msg{margin:12px 0 0;min-height:1.5em;font-weight:600}
+.empty{color:var(--muted);margin:0}
+</style>
+</head>
+<body>
+<main>
+<h1>Registro de compras</h1>
+<p class="sub">Anota lo que compraste. Al final, envía todo a tu Google Sheet.</p>
+
+<form id="f">
+  <label>Producto
+    <input id="prod" list="prods" required autocomplete="off" placeholder="Harina, leche, café en grano…">
+    <datalist id="prods"></datalist>
+  </label>
+  <div class="row">
+    <label>Unidades <input id="qty" type="number" min="0.01" step="any" inputmode="decimal" required></label>
+    <label>Monto total ($) <input id="amt" type="number" min="0" step="any" inputmode="decimal" required></label>
+  </div>
+  <label>Fecha <input id="date" type="date" required></label>
+  <button class="add" type="submit">Agregar a la lista</button>
+</form>
+
+<section class="list">
+  <h2>Pendientes de enviar</h2>
+  <ul id="ul"></ul>
+  <p class="empty" id="empty">Aún no agregaste compras.</p>
+  <div class="tot" id="tot" hidden><span>Total</span><span id="sum"></span></div>
+  <button class="send" id="send" disabled>Enviar a Google Sheets</button>
+  <p id="msg" role="status"></p>
+</section>
+</main>
+
+<script>
+// Pega aquí la URL de tu Web App de Apps Script (termina en /exec)
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxr-_TioSWo6BnLH65aGpEugA4mSZpPynSww06aoXYfRjQqlYLz2HAjVlivHXraWq09/exec";
+
+const $ = id => document.getElementById(id);
+const money = n => "$" + Number(n).toLocaleString("es-AR",{maximumFractionDigits:2});
+let items = [], known = [];
+
+function load(){
+  try{ items = JSON.parse(localStorage.getItem("compras")||"[]"); known = JSON.parse(localStorage.getItem("productos")||"[]"); }catch(e){}
+}
+function save(){
+  try{ localStorage.setItem("compras",JSON.stringify(items)); localStorage.setItem("productos",JSON.stringify(known)); }catch(e){}
+}
+function render(){
+  $("ul").innerHTML = items.map((it,i)=>
+    `<li><span>${esc(it.producto)}<small>${it.unidades} u. · ${money(it.monto/it.unidades)} c/u · ${it.fecha}</small></span>
+     <span><b>${money(it.monto)}</b> <button class="del" data-i="${i}" aria-label="Quitar ${esc(it.producto)}">Quitar</button></span></li>`).join("");
+  $("empty").hidden = items.length>0;
+  $("tot").hidden = !items.length;
+  $("sum").textContent = money(items.reduce((s,x)=>s+x.monto,0));
+  $("send").disabled = !items.length;
+  $("prods").innerHTML = known.map(p=>`<option value="${esc(p)}">`).join("");
+}
+function esc(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function say(t,err){const m=$("msg");m.textContent=t;m.style.color=err?"var(--err)":"var(--ac)"}
+
+$("date").valueAsDate = new Date();
+$("f").addEventListener("submit",e=>{
+  e.preventDefault();
+  const producto=$("prod").value.trim();
+  items.push({producto,unidades:+$("qty").value,monto:+$("amt").value,fecha:$("date").value});
+  if(!known.includes(producto)) known.push(producto);
+  save(); render(); say("");
+  $("prod").value=$("qty").value=$("amt").value=""; $("prod").focus();
+});
+$("ul").addEventListener("click",e=>{
+  const i=e.target.dataset.i; if(i===undefined) return;
+  items.splice(+i,1); save(); render();
+});
+$("send").addEventListener("click",async()=>{
+  if(!APPS_SCRIPT_URL){ say("Falta pegar la URL de Apps Script en el código (APPS_SCRIPT_URL).",true); return; }
+  $("send").disabled=true; say("Enviando…");
+  try{
+    await fetch(APPS_SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({compras:items})});
+    say("Enviado: "+items.length+" compra(s) a tu hoja.");
+    items=[]; save(); render();
+  }catch(err){ say("No se pudo enviar. Tus compras siguen guardadas; reintenta.",true); $("send").disabled=false; }
+});
+
+load(); render();
+</script>
+</body>
+</html>
